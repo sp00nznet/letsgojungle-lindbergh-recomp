@@ -16,46 +16,74 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
 > recompiled C is output you generate.
 
-## Status — blocked on the disc, not on the toolchain
+## Status — the whole game lifts
 
-Honest version, in two parts.
-
-**The toolchain is ready.** The disc carves, the ELF pipeline lifts, the
-runtime builds and runs 32-bit. This repo configures and passes its checks from
-a fresh clone right now:
+`lgj_final` is a 12.7 MB `ET_EXEC` / `EM_386` binary with entry point
+`0x08072d70`, and **it ships its full symbol table**. That is the single best
+thing about this target:
 
 ```
-> cmake -S . -B build -A Win32
--- letsgojungle: no lifted code in .../generated yet, building the toolkit
-   self-check only.
-> .\build\lindberghrecomp\Release\lindbergh_rt_selftest.exe
-ok: dispatch table, syscall layer, import names
+$ py -3.11 -m tools elf lgj_final
+entry      0x08072d70
+image      0x08048000 + 0xc23f44
+segments   2 PT_LOAD
+functions  31752 sized STT_FUNC symbols
+imports    406 PLT stubs
+  needs    libCg.so  libCgGL.so  libxerces-c.so.26  libGLU.so.1  libGL.so.1
+  needs    libsegaapi.so  libpthread.so.0  libm.so.6  libgcc_s.so.1
+  needs    libc.so.6  libXext.so.6  libX11.so.6  libdl.so.2
 ```
 
-**The disc is encrypted.** Carving the dump gets as far as named, correctly
-sized payload files and no further:
+No function discovery, no bounds file to export from Ghidra, no heuristic
+carving. The ELF says where all 31,752 functions start and how long each one
+is. And **all 31,752 lift, in 28 seconds**, into 1,702,616 lines of C. Not one
+failed outright.
+
+| | |
+|---|---|
+| Functions recovered | **31,752** — from the binary's own symbol table |
+| Functions lifted | **31,752 / 31,752**, in 28 s |
+| C emitted | 1,702,616 lines |
+| Instruction coverage | **90.6%** — 160,820 lines are `/* TODO */ abort()` |
+| Imports to implement | **406** across 13 libraries |
+| Runs | Not yet. See the two things below. |
+
+### What is left, precisely
+
+**1. SSE, in the lifter.** *Let's Go Jungle* is a Pentium 4 game and it keeps
+its floats in XMM registers. The lifter came from Pentium III targets and has
+no SSE at all, which is 87.7% of every unlifted instruction here — `movss`
+alone is 74,438 of them. Scalar SSE plus `cmovcc` plus making `prefetcht0` a
+no-op closes 92.8% of the gap. That work is upstream in
+[pcrecomp](https://github.com/sp00nznet/pcrecomp), not in this repo.
+
+**2. The 406 imports.** Shorter than it looks: stock glibc, stock OpenGL/GLU,
+stock X11, NVIDIA's Cg shader runtime, Xerces — and exactly one Sega library,
+`libsegaapi.so`, the sound API. Everything else is a library that still exists
+and whose behaviour is documented. `hle_call()` aborts naming whatever it wants
+next, so the order of work picks itself.
+
+### The disc
+
+The retail DVD is encrypted and
+[lindberghrecomp does not decrypt it](https://github.com/sp00nznet/lindberghrecomp/blob/master/docs/disc-format.md) —
+the dump carves to named payload files and every one is ciphertext under a key
+that lives in the cabinet. Bring a game tree you can already read; arcade
+preservation projects have published clean dumps of many Lindbergh titles,
+taken from original DVDs and cabinet hard discs by people who had the keys.
+A clean tree looks like this:
 
 ```
-> py -3.11 -m tools disc "Let's Go Jungle (World) (En,Ja) (Lindbergh Yellow) (Rev A).iso"
-0x002b0000  sector 1376    SEGA_LINDBERGH   LETS_GO_JUNGLE               1.0 MB
-0x003b8000  sector 1904    LINUX            CDROM                     1068.4 MB
-
-disk0.img       1034084352      disk1.img          372736
-disk9.img            372736     su1.dat          32891331
-su2.dat              340450     frontend.set          878
+disk0/
+  lgj_final              the game (this is the ELF)
+  game                   the launcher script
+  lgjrc                  its config
+  data/                  ADX/AIX audio, CSB banks, .xaf sound banks
+  shader/Cg  extraShader/Cg
+  libCg.so  libCgGL.so  libCgFX.so  libpng.so  libxerces-c.so
 ```
 
-Every one of those is ciphertext. `disk0.img` is the game's root filesystem and
-the `main.elf` inside it is the thing this repo exists to recompile — under a
-key that lives in the cabinet, not on the disc.
-[The measurements are written up here](https://github.com/sp00nznet/lindberghrecomp/blob/master/docs/disc-format.md),
-including the evidence that this disc shares its key with *Initial D 4*.
-
-**lindberghrecomp does not decrypt Lindbergh media and neither does this repo.**
-What unblocks it is a `disk0.img` you can mount or an install off a board's own
-hard disc. Everything downstream is already waiting for it.
-
-## What happens when the ELF turns up
+## Reproducing it
 
 ```powershell
 git clone --recursive https://github.com/sp00nznet/letsgojungle-lindbergh-recomp
