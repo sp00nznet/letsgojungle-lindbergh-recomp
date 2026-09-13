@@ -1,0 +1,29 @@
+build/
+build-*/
+.vs/
+.vscode/
+*.obj
+*.lib
+*.exe
+*.pdb
+*.ilk
+out/
+__pycache__/
+*.pyc
+
+# The lifted game. You generate it; it is derived from Sega's binary and it
+# does not belong in a repo.
+games/letsgojungle/generated/*
+!games/letsgojungle/generated/.gitkeep
+
+# Game media of any kind. Bring your own.
+*.iso
+*.img
+*.dat
+*.elf
+*.set
+
+# Agent scratch - never committed.
+CLAUDE.md
+.claude/
+AGENTS.md
