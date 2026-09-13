@@ -44,24 +44,44 @@ failed outright.
 | Functions recovered | **31,752** — from the binary's own symbol table |
 | Functions lifted | **31,752 / 31,752**, in 28 s |
 | C emitted | 1,702,616 lines |
-| Instruction coverage | **90.6%** — 160,820 lines are `/* TODO */ abort()` |
+| Instruction coverage | **99.91%** — 1,558 lines are `/* TODO */ abort()` |
 | Imports to implement | **406** across 13 libraries |
-| Runs | Not yet. See the two things below. |
+| Compiles | **Yes** — the 600 most SSE-dense functions, 85,402 SSE instructions, clean MSVC object |
+| Runs | Not yet. The 406 imports still need bodies. |
 
-### What is left, precisely
+### SSE is done
 
-**1. SSE, in the lifter.** *Let's Go Jungle* is a Pentium 4 game and it keeps
-its floats in XMM registers. The lifter came from Pentium III targets and has
-no SSE at all, which is 87.7% of every unlifted instruction here — `movss`
-alone is 74,438 of them. Scalar SSE plus `cmovcc` plus making `prefetcht0` a
-no-op closes 92.8% of the gap. That work is upstream in
-[pcrecomp](https://github.com/sp00nznet/pcrecomp), not in this repo.
+The first full lift came out at 90.6% coverage, and the missing 9.4% was one
+family: *Let's Go Jungle* is a Pentium 4 game that keeps its floats in XMM
+registers, and the lifter came from Pentium III targets with no SSE at all.
+`movss` alone was 46% of the whole gap.
 
-**2. The 406 imports.** Shorter than it looks: stock glibc, stock OpenGL/GLU,
+That got fixed **upstream in
+[pcrecomp](https://github.com/sp00nznet/pcrecomp)** rather than here — one x86
+lifter serves every PC-era target, and forking it to fix one game is how you
+end up maintaining four. Scalar SSE, the compares, the conversions, the 128-bit
+moves and bitwise ops, `cmovcc`, and the prefetch hints as no-ops:
+
+| | before | after |
+|---|---:|---:|
+| Instruction coverage | 90.55% | **99.91%** |
+| `/* TODO */ abort()` lines | 160,820 | **1,558** |
+
+And the output compiles: the 600 densest SSE functions in the game — 85,402 SSE
+instructions between them — build to a clean 10 MB object with no warnings.
+
+What is still unlifted is 1,558 lines of x87 leftovers, MMX, packed SSE
+arithmetic, and 83 port-I/O instructions that userspace has no business
+executing anyway.
+
+### What is left
+
+**The 406 imports.** Shorter than it looks: stock glibc, stock OpenGL/GLU,
 stock X11, NVIDIA's Cg shader runtime, Xerces — and exactly one Sega library,
 `libsegaapi.so`, the sound API. Everything else is a library that still exists
 and whose behaviour is documented. `hle_call()` aborts naming whatever it wants
-next, so the order of work picks itself.
+next, so the order of work picks itself: glibc, then GL and Cg, then sound,
+then the JVS I/O the guns arrive on.
 
 ### The disc
 
