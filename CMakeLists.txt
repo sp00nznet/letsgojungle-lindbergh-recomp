@@ -15,8 +15,8 @@ add_subdirectory(lindberghrecomp)
 
 set(GEN "${CMAKE_CURRENT_SOURCE_DIR}/games/letsgojungle/generated")
 
-if(EXISTS "${GEN}/recomp_funcs.c" AND EXISTS "${GEN}/recomp_imports.h")
-    file(GLOB LIFTED "${GEN}/recomp_funcs*.c")
+file(GLOB LIFTED "${GEN}/recomp_funcs_*.c")
+if(LIFTED AND EXISTS "${GEN}/recomp_imports.h")
     add_executable(letsgojungle
         games/letsgojungle/src/host.c
         ${LIFTED}

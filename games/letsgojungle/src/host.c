@@ -29,8 +29,17 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    /* Before anything guest-shaped runs, so a fault in lifted code reports
+     * the simulated machine rather than a C function name in a generated file. */
+    guest_install_crash_handler();
+
     if (guest_load(argv[1], argc - 1, argv + 1) != 0)
         return 1;
+
+    /* Give the imports bodies. Everything the toolkit ships is bound here;
+     * anything this game needs beyond that gets bound on top, and whatever is
+     * still missing aborts naming itself on first call. */
+    hle_register_all();
 
     CPU cpu;
     guest_init_cpu(&cpu);

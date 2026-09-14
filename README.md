@@ -16,72 +16,61 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
 > recompiled C is output you generate.
 
-## Status — the whole game lifts
+## Status — it boots and reaches `main()`
 
-`lgj_final` is a 12.7 MB `ET_EXEC` / `EM_386` binary with entry point
-`0x08072d70`, and **it ships its full symbol table**. That is the single best
-thing about this target:
+`lgj_final` is a 12.7 MB `ET_EXEC` / `EM_386` binary that **ships its full
+symbol table**, which is the single best thing about this target: 31,759
+functions with names and sizes, so there is no function-discovery problem at
+all. All of them lift, in 28 seconds, into 1,707,769 lines of C across 80
+translation units — and that compiles and links into a 25 MB native
+executable which then runs the game's entire C runtime:
 
 ```
-$ py -3.11 -m tools elf lgj_final
-entry      0x08072d70
-image      0x08048000 + 0xc23f44
-segments   2 PT_LOAD
-functions  31752 sized STT_FUNC symbols
-imports    406 PLT stubs
-  needs    libCg.so  libCgGL.so  libxerces-c.so.26  libGLU.so.1  libGL.so.1
-  needs    libsegaapi.so  libpthread.so.0  libm.so.6  libgcc_s.so.1
-  needs    libc.so.6  libXext.so.6  libX11.so.6  libdl.so.2
+> letsgojungle.exe lgj_final
+[crt] __libc_csu_init at 0x0859fff8
+[hle] glXGetProcAddressARB
+[crt] main at 0x08411ff0 (argc=1)
+...
+[hle] XOpenDisplay
 ```
 
-No function discovery, no bounds file to export from Ghidra, no heuristic
-carving. The ELF says where all 31,752 functions start and how long each one
-is. And **all 31,752 lift, in 28 seconds**, into 1,702,616 lines of C. Not one
-failed outright.
+`_start`, every C++ static constructor in the binary — Xerces, Cg, the game's
+own globals — then `main`. All of it executing lifted x86.
 
 | | |
 |---|---|
-| Functions recovered | **31,752** — from the binary's own symbol table |
-| Functions lifted | **31,752 / 31,752**, in 28 s |
-| C emitted | 1,702,616 lines |
-| Instruction coverage | **99.91%** — 1,558 lines are `/* TODO */ abort()` |
-| Imports to implement | **406** across 13 libraries |
-| Compiles | **Yes** — the 600 most SSE-dense functions, 85,402 SSE instructions, clean MSVC object |
-| Runs | Not yet. The 406 imports still need bodies. |
+| Functions recovered | **31,759** — from the binary's own symbol table |
+| Functions lifted | **31,759 / 31,759**, in 28 s |
+| C emitted | 1,707,769 lines, 80 translation units |
+| Instruction coverage | **99.94%** — 962 `/* TODO */ abort()` lines |
+| Compiles and links | **Yes** — 25 MB executable |
+| Boots | **Yes** — CRT, static constructors, `main` |
+| Imports bound | 81 of 406 |
 
-### SSE is done
+### What it asks for, in order
 
-The first full lift came out at 90.6% coverage, and the missing 9.4% was one
-family: *Let's Go Jungle* is a Pentium 4 game that keeps its floats in XMM
-registers, and the lifter came from Pentium III targets with no SSE at all.
-`movss` alone was 46% of the whole gap.
+Run it with `LINDBERGH_HLE_PERMISSIVE=1` and every unbound import reports
+itself once instead of aborting, so a single run enumerates the whole startup
+path:
 
-That got fixed **upstream in
-[pcrecomp](https://github.com/sp00nznet/pcrecomp)** rather than here — one x86
-lifter serves every PC-era target, and forking it to fix one game is how you
-end up maintaining four. Scalar SSE, the compares, the conversions, the 128-bit
-moves and bitwise ops, `cmovcc`, and the prefetch hints as no-ops:
+```
+glXGetProcAddressARB            <- the only import the constructors need
+pthread_mutex_lock / unlock
+getcwd, realpath                <- works out where it is installed
+pthread_mutexattr_*, pthread_mutex_init, pthread_cond_init
+pthread_attr_*, sched_get_priority_max / min
+pthread_create                  <- spawns a worker thread
+pthread_cond_wait               <- and waits on it
+XSetErrorHandler, XOpenDisplay  <- opens the display
+```
 
-| | before | after |
-|---|---:|---:|
-| Instruction coverage | 90.55% | **99.91%** |
-| `/* TODO */ abort()` lines | 160,820 | **1,558** |
+So the next two jobs are **pthread** on Win32 threads, and then the window.
 
-And the output compiles: the 600 densest SSE functions in the game — 85,402 SSE
-instructions between them — build to a clean 10 MB object with no warnings.
-
-What is still unlifted is 1,558 lines of x87 leftovers, MMX, packed SSE
-arithmetic, and 83 port-I/O instructions that userspace has no business
-executing anyway.
-
-### What is left
-
-**The 406 imports.** Shorter than it looks: stock glibc, stock OpenGL/GLU,
-stock X11, NVIDIA's Cg shader runtime, Xerces — and exactly one Sega library,
-`libsegaapi.so`, the sound API. Everything else is a library that still exists
-and whose behaviour is documented. `hle_call()` aborts naming whatever it wants
-next, so the order of work picks itself: glibc, then GL and Cg, then sound,
-then the JVS I/O the guns arrive on.
+`XOpenDisplay` is the right place to stop. Reimplementing 50 Xlib calls on
+Windows so they can hand a GLX context to WGL would be absurd — the seam gets
+cut there instead, with a Win32 window and a WGL context behind an opaque
+`Display *` the game never looks inside. That turns 68 X11 and GLX imports into
+about a dozen shims.
 
 ### The disc
 
@@ -102,6 +91,10 @@ disk0/
   shader/Cg  extraShader/Cg
   libCg.so  libCgGL.so  libCgFX.so  libpng.so  libxerces-c.so
 ```
+
+Those `.so` files are themselves 32-bit x86 ELFs with symbols — `libCg.so` has
+284 functions, `libxerces-c.so` has 9,010 — so the 20 Cg and Xerces imports do
+not need reimplementing either. They can go through the same pipeline.
 
 ## Reproducing it
 
