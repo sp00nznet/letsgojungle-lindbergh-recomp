@@ -16,61 +16,76 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
 > recompiled C is output you generate.
 
-## Status — it boots and reaches `main()`
+## Status — it opens a window, uploads shaders, and loads textures
 
 `lgj_final` is a 12.7 MB `ET_EXEC` / `EM_386` binary that **ships its full
-symbol table**, which is the single best thing about this target: 31,759
-functions with names and sizes, so there is no function-discovery problem at
-all. All of them lift, in 28 seconds, into 1,707,769 lines of C across 80
-translation units — and that compiles and links into a 25 MB native
-executable which then runs the game's entire C runtime:
+symbol table** — 31,759 functions with names and sizes, so there is no
+function-discovery problem at all. All of them lift, in 28 seconds, into 80
+translation units that compile and link into a 25 MB native executable.
+
+That executable runs the game's entire C runtime and a good deal of its engine:
 
 ```
 > letsgojungle.exe lgj_final
-[crt] __libc_csu_init at 0x0859fff8
-[hle] glXGetProcAddressARB
+[vidmode] 11 entry points overridden
+[gl] 96 of 96 entry points bound
 [crt] main at 0x08411ff0 (argc=1)
-...
-[hle] XOpenDisplay
+[pthread] created thread at 0x084f9d82, 1024 KB stack   ×3
+[window] 1360x768
+[glX] context created (pixel format 11)
+[glX] current: NVIDIA GeForce RTX 5070/PCIe/SSE2 / 4.6.0 NVIDIA 595.97
+[cg] indexed 197 precompiled shaders
 ```
-
-`_start`, every C++ static constructor in the binary — Xerces, Cg, the game's
-own globals — then `main`. All of it executing lifted x86.
 
 | | |
 |---|---|
-| Functions recovered | **31,759** — from the binary's own symbol table |
-| Functions lifted | **31,759 / 31,759**, in 28 s |
-| C emitted | 1,707,769 lines, 80 translation units |
-| Instruction coverage | **99.94%** — 962 `/* TODO */ abort()` lines |
-| Compiles and links | **Yes** — 25 MB executable |
-| Boots | **Yes** — CRT, static constructors, `main` |
-| Imports bound | 81 of 406 |
+| Functions lifted | **31,759 / 31,759**, 28 s, 1.7 M lines of C |
+| Instruction coverage | **99.96%** — 724 `RECOMP_TODO` lines left |
+| Boots | CRT, every static constructor, `main` |
+| Threads | 3 guest threads, each on its own CPU and stack |
+| Window | 1360×768, real WGL context on the host GPU |
+| Shaders | **25 ARB programs uploaded** via `glProgramStringARB` |
+| Textures | 39 binds, 12 `glTexImage2D` uploads |
+| Imports | **0 unbound** on the path reached so far |
+| Presents a frame | **Not yet** — stops in `_sShaderManager::getShaderByName` |
 
-### What it asks for, in order
+### Running it
 
-Run it with `LINDBERGH_HLE_PERMISSIVE=1` and every unbound import reports
-itself once instead of aborting, so a single run enumerates the whole startup
-path:
-
-```
-glXGetProcAddressARB            <- the only import the constructors need
-pthread_mutex_lock / unlock
-getcwd, realpath                <- works out where it is installed
-pthread_mutexattr_*, pthread_mutex_init, pthread_cond_init
-pthread_attr_*, sched_get_priority_max / min
-pthread_create                  <- spawns a worker thread
-pthread_cond_wait               <- and waits on it
-XSetErrorHandler, XOpenDisplay  <- opens the display
+```powershell
+# the engine finds its data through TEA_DIR, exactly as the cabinet's
+# launcher script sets it
+$env:TEA_DIR = "X:\path\to\disk0"
+.\build\Release\letsgojungle.exe X:\path\to\disk0\lgj_final
 ```
 
-So the next two jobs are **pthread** on Win32 threads, and then the window.
+Two environment variables help during bring-up: `LINDBERGH_HLE_PERMISSIVE=1`
+reports each unbound import once and carries on instead of stopping, so one run
+enumerates the whole demand list; `LINDBERGH_HLE_TRACE=1` names every import as
+it is entered.
 
-`XOpenDisplay` is the right place to stop. Reimplementing 50 Xlib calls on
-Windows so they can hand a GLX context to WGL would be absurd — the seam gets
-cut there instead, with a Win32 window and a WGL context behind an opaque
-`Display *` the game never looks inside. That turns 68 X11 and GLX imports into
-about a dozen shims.
+### What the engine needed that was not obvious
+
+**`XFree86-VidModeExtension`.** The game will not build its window without it,
+and `libXxf86vm` is linked statically *into* the binary — so there was no
+import to bind. The toolkit grew guest-function overrides for this: replace a
+lifted function with a host body, by symbol name.
+
+**`Display` is not opaque.** `struct _XDisplay` is public in `Xlib.h` and
+`DefaultScreen(dpy)` is a macro that reads offset 132 directly.
+
+**547 GL entry points, not 96.** `es::glh_helper::init_extensions` resolves
+them through `glXGetProcAddressARB` and sets its feature flags only if they all
+arrive. The 451 with no import get a synthetic address the runtime forwards to
+the host driver.
+
+**Cg, answered from the disc.** The game compiles its shaders at startup and
+there is no Cg runtime here — but every shader ships twice, `vs.cg` beside
+`vs.asm_gl`, the second being the first as `cgc` compiled it in 2005. Match the
+source, return the compiled text.
+
+**`fscanf`.** The game reads its configuration with `while (!feof(f))
+fscanf(...)`. An unbound `fscanf` consumes nothing, so it span a hundred
+thousand times a second and drew nothing.
 
 ### The disc
 
