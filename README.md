@@ -16,18 +16,16 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
 > recompiled C is output you generate.
 
-## Status — it opens a window, uploads shaders, and loads textures
+## Status — it renders
 
-`lgj_final` is a 12.7 MB `ET_EXEC` / `EM_386` binary that **ships its full
-symbol table** — 31,759 functions with names and sizes, so there is no
-function-discovery problem at all. All of them lift, in 28 seconds, into 80
-translation units that compile and link into a 25 MB native executable.
-
-That executable runs the game's entire C runtime and a good deal of its engine:
+**Let's Go Jungle runs its attract mode as recompiled C, at roughly 32 frames
+per second.** No emulator, no interpreter: 31,759 functions lifted from the
+game's own ELF to C, compiled into a native 32-bit executable, drawing on the
+host GPU through the real OpenGL driver.
 
 ```
-> letsgojungle.exe lgj_final
-[vidmode] 11 entry points overridden
+> $env:TEA_DIR = "X:\path\to\disk0"
+> .\build\Release\letsgojungle.exe X:\path\to\disk0\lgj_final
 [gl] 96 of 96 entry points bound
 [crt] main at 0x08411ff0 (argc=1)
 [pthread] created thread at 0x084f9d82, 1024 KB stack   ×3
@@ -37,51 +35,50 @@ That executable runs the game's entire C runtime and a good deal of its engine:
 [cg] indexed 197 precompiled shaders
 ```
 
+Measured over 60 seconds of attract mode:
+
+| | per run | per frame |
+|---|---:|---:|
+| `glXSwapBuffers` | 1,939 | — |
+| `glClear` | 21,320 | ~11 |
+| `glBegin` | 104,319 | ~54 |
+| `glBindTexture` | 106,550 | ~55 |
+| `glProgramStringARB` | 189 | — |
+
 | | |
 |---|---|
 | Functions lifted | **31,759 / 31,759**, 28 s, 1.7 M lines of C |
-| Instruction coverage | **99.96%** — 724 `RECOMP_TODO` lines left |
-| Boots | CRT, every static constructor, `main` |
+| Instruction coverage | **99.96%** — 622 `RECOMP_TODO` lines, none reached |
+| Imports bound | 406 of 406 on every path reached |
 | Threads | 3 guest threads, each on its own CPU and stack |
-| Window | 1360×768, real WGL context on the host GPU |
-| Shaders | **25 ARB programs uploaded** via `glProgramStringARB` |
-| Textures | 39 binds, 12 `glTexImage2D` uploads |
-| Imports | **0 unbound** on the path reached so far |
-| Presents a frame | **Not yet** — stops in `_sShaderManager::getShaderByName` |
+| Shaders | 189 ARB programs uploaded |
 
-### Running it
+`TEA_DIR` must point at the game directory — the engine finds all its data
+through it, exactly as the cabinet's launcher script sets it.
 
-```powershell
-# the engine finds its data through TEA_DIR, exactly as the cabinet's
-# launcher script sets it
-$env:TEA_DIR = "X:\path\to\disk0"
-.\build\Release\letsgojungle.exe X:\path\to\disk0\lgj_final
-```
+### The five things the engine needed
 
-Two environment variables help during bring-up: `LINDBERGH_HLE_PERMISSIVE=1`
-reports each unbound import once and carries on instead of stopping, so one run
-enumerates the whole demand list; `LINDBERGH_HLE_TRACE=1` names every import as
-it is entered.
+**`XFree86-VidModeExtension`.** It will not build a window without one, and
+`libXxf86vm` is linked statically *into* the binary — so there was no import to
+bind. The toolkit grew guest-function overrides for it: replace a lifted
+function with a host body, by symbol name.
 
-### What the engine needed that was not obvious
-
-**`XFree86-VidModeExtension`.** The game will not build its window without it,
-and `libXxf86vm` is linked statically *into* the binary — so there was no
-import to bind. The toolkit grew guest-function overrides for this: replace a
-lifted function with a host body, by symbol name.
-
-**`Display` is not opaque.** `struct _XDisplay` is public in `Xlib.h` and
+**`Display` is a real struct.** `struct _XDisplay` is public in `Xlib.h` and
 `DefaultScreen(dpy)` is a macro that reads offset 132 directly.
 
 **547 GL entry points, not 96.** `es::glh_helper::init_extensions` resolves
 them through `glXGetProcAddressARB` and sets its feature flags only if they all
-arrive. The 451 with no import get a synthetic address the runtime forwards to
-the host driver.
+arrive. The 451 with no import get a synthetic address forwarded to the host
+driver through a thunk that saves `esp` across the call — which makes the
+argument count, unknowable for an arbitrary name, not matter.
 
-**Cg, answered from the disc.** The game compiles its shaders at startup and
-there is no Cg runtime here — but every shader ships twice, `vs.cg` beside
-`vs.asm_gl`, the second being the first as `cgc` compiled it in 2005. Match the
-source, return the compiled text.
+**Cg, answered from the disc.** The engine compiles ~260 shader programs at
+startup and there is no Cg runtime here. But every shader ships twice, `vs.cg`
+beside `vs.asm_gl`, the second being the first as `cgc` compiled it in 2005.
+Matching them takes two keys, because neither alone is unique: the `#define`
+permutation (which the engine passes as args, and which `cgc` stamped into each
+`.asm_gl` header) and the shader itself (whose body, reduced to bare code, is
+findable inside the 84 KB preprocessed source the engine hands over).
 
 **`fscanf`.** The game reads its configuration with `while (!feof(f))
 fscanf(...)`. An unbound `fscanf` consumes nothing, so it span a hundred
