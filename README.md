@@ -18,7 +18,14 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 
 ## Status — attract mode runs
 
-![Let's Go Jungle attract mode](docs/attract.png)
+![Two giant spiders mid-leap on a jungle path, both players' rifles and
+crosshairs on screen, combo counters running](docs/attract.png)
+
+![A swarm of giant wasps in a cave, muzzle flash and tracer from the left-hand
+rifle](docs/attract-cave.png)
+
+The attract loop runs end to end: warning card, SEGA and CRIWARE logos, title,
+the tutorial, a demo of the rail sequences, and the monthly ranking board.
 
 *Let's Go Jungle* boots from its own ELF, opens a window, answers the cabinet's
 base board, and runs its attract mode at 1360×768 with its own shaders,
