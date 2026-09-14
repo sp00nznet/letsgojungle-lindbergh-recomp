@@ -16,16 +16,16 @@ the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
 > recompiled C is output you generate.
 
-## Status — it renders
+## Status — it runs a full render loop, and presents a black frame
 
-**Let's Go Jungle runs its attract mode as recompiled C, at roughly 32 frames
-per second.** No emulator, no interpreter: 31,759 functions lifted from the
-game's own ELF to C, compiled into a native 32-bit executable, drawing on the
-host GPU through the real OpenGL driver.
+**Corrected.** An earlier version of this file claimed the attract mode
+rendered. It does not. The call counts below are real and the render loop is
+real, but the frame that reaches the screen is empty — measured, not assumed.
+
+*Let's Go Jungle* boots from its own ELF, opens a window, loads its shaders and
+runs a sustained render loop at ~32 fps:
 
 ```
-> $env:TEA_DIR = "X:\path\to\disk0"
-> .\build\Release\letsgojungle.exe X:\path\to\disk0\lgj_final
 [gl] 96 of 96 entry points bound
 [crt] main at 0x08411ff0 (argc=1)
 [pthread] created thread at 0x084f9d82, 1024 KB stack   ×3
@@ -35,26 +35,39 @@ host GPU through the real OpenGL driver.
 [cg] indexed 197 precompiled shaders
 ```
 
-Measured over 60 seconds of attract mode:
-
-| | per run | per frame |
+| | per 60 s | per frame |
 |---|---:|---:|
 | `glXSwapBuffers` | 1,939 | — |
-| `glClear` | 21,320 | ~11 |
-| `glBegin` | 104,319 | ~54 |
+| `glVertex3f` | 127,080 | ~298 |
+| `glBegin` / `glEnd` | 22,596 | ~53 |
+| `glProgramEnvParameter4fvARB` | 81,029 | ~190 |
 | `glBindTexture` | 106,550 | ~55 |
 | `glProgramStringARB` | 189 | — |
+| **non-black pixels presented** | **0** | **0** |
 
-| | |
-|---|---|
-| Functions lifted | **31,759 / 31,759**, 28 s, 1.7 M lines of C |
-| Instruction coverage | **99.96%** — 622 `RECOMP_TODO` lines, none reached |
-| Imports bound | 406 of 406 on every path reached |
-| Threads | 3 guest threads, each on its own CPU and stack |
-| Shaders | 189 ARB programs uploaded |
+### What is ruled out
 
-`TEA_DIR` must point at the game directory — the engine finds all its data
-through it, exactly as the cabinet's launcher script sets it.
+`LINDBERGH_FBSTATS=1` reads the back buffer with `glReadPixels` before each
+swap and reports how much of it is lit. The instrument verifies itself: on one
+frame it paints a colour nothing else would produce and reads it straight back,
+which comes through at 100%. So the readback, the drawable and `GL_BACK` are
+all correct, and the black frame is real.
+
+With that, the following are measured and **not** the cause:
+
+* **Shaders** — 189 ARB programs load, none rejected (`GL_PROGRAM_ERROR_POSITION_ARB` is −1 throughout).
+* **Cg matching** — of the first 50 programs, all 50 matched on shader body *and* defines; none fell back to the looser key.
+* **Render state** — colour mask `1111`, depth `GL_LEQUAL` cleared to 1.0, alpha test off, blend off, scissor off.
+* **ARB programs enabled** — `glEnable(GL_VERTEX_PROGRAM_ARB)` and the fragment equivalent both reach the driver.
+* **Framebuffer objects** — forcing every bind to the default framebuffer (`LINDBERGH_NO_FBO=1`) does not change it.
+
+### Where it actually goes
+
+The engine renders into framebuffer objects — 10 binds per frame — and the
+frame ends with state setup and a swap, with no final draw to the default
+framebuffer. At swap time the last render target set was 128×128, a small
+offscreen buffer. The composite that should bring the scene to the screen never
+lands, and why is not yet known.
 
 ### The five things the engine needed
 
