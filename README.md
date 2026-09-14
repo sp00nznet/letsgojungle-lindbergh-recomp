@@ -61,7 +61,32 @@ With that, the following are measured and **not** the cause:
 * **ARB programs enabled** — `glEnable(GL_VERTEX_PROGRAM_ARB)` and the fragment equivalent both reach the driver.
 * **Framebuffer objects** — forcing every bind to the default framebuffer (`LINDBERGH_NO_FBO=1`) does not change it.
 
-### Where it actually goes
+### Why it is black
+
+The geometry is correct. `glVertex3f` submits (-1,1,0) (-1,-1,0) (1,1,0)
+(1,-1,0) — a fullscreen quad already in clip space, which should pass straight
+through. It does not appear, so the bound vertex program is applying a world
+transform to coordinates that were already in normalised device space.
+
+It is bound wrongly because **the disc ships one compiled form per shader and
+the engine asks for several**. `shader/Cg/vs/vs.cg` has a single `vs.asm_gl`
+beside it, but the engine compiles that shader repeatedly with different
+`MODE_VS_1_1` / `MODE_VS_2_0` / `MODE_VP40` permutations — ~261 requests
+against 197 precompiled pairs, with zero match failures, so variants collide
+onto the same program. For a fullscreen blit pass the one it gets is a world
+transform.
+
+The matcher cannot separate them: across all 197 shaders there are only **two
+distinct define sets**, because `cgc` records the whole block in every header
+and it barely varies. Matching now identifies *which shader* correctly (a
+shader's own code — everything after its last `#include` — is the tail of the
+preprocessed source), but *which variant* is not recorded on the disc at all.
+
+The fix is a real Cg compiler. `libCg.so` ships on the disc as a 32-bit x86 ELF
+with 284 symbols — exactly what this toolkit lifts — and needs shared-object
+loading in the runtime, which does not exist yet.
+
+### Where the frame goes
 
 The engine renders into framebuffer objects — 10 binds per frame — and the
 frame ends with state setup and a swap, with no final draw to the default
