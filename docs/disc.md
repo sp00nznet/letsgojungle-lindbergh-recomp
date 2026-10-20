@@ -3,7 +3,7 @@
 ## The disc
 
 The retail DVD is encrypted and
-[lindberghrecomp does not decrypt it](https://github.com/sp00nznet/lindberghrecomp/blob/master/docs/disc-format.md) —
+[lindberghrecomp does not decrypt it](https://github.com/sp00nznet/lindberghrecomp/blob/main/docs/disc-format.md) —
 the dump carves to named payload files and every one is ciphertext under a key
 that lives in the cabinet. Bring a game tree you can already read; arcade
 preservation projects have published clean dumps of many Lindbergh titles,

@@ -10,13 +10,20 @@ nothing from the outside world — no network, no card reader, no linked
 cabinets. A gun, a trigger, and a rail.
 
 Built on [**lindberghrecomp**](https://github.com/sp00nznet/lindberghrecomp),
-the Sega Lindbergh recompilation toolkit, vendored here as a git submodule.
+the Sega Lindbergh recompilation toolkit, vendored here as a git submodule. It
+shares the house style of sp00nznet's other recomp projects.
 
 > **No game data here.** No ELF, no disc, no filesystem image, no keys. The
 > `.gitignore` refuses all of it. Bring a game tree you can already read; the
-> recompiled C is output you generate.
+> recompiled C is output you generate, and it is never distributed.
 
-## Status — attract mode runs
+**[Join the sp00nznet recomp Discord](https://discord.gg/CRpzGWZFcu)**
+
+## Status
+
+**Alpha, unreleased.** Attract mode runs; the game cannot be played yet. The
+[changelog](CHANGELOG.md) says what changed, and the [roadmap](ROADMAP.md) says
+what is next.
 
 ![Two giant spiders mid-leap on a jungle path, both players' rifles and
 crosshairs on screen, combo counters running](docs/attract.png)
@@ -42,15 +49,19 @@ before the swap, not a mock-up.
 [cg] indexed 197 precompiled shaders
 ```
 
+| lifts | builds | boots | renders | plays |
+|:-:|:-:|:-:|:-:|:-:|
+| ✅ 99.96% | ✅ | ✅ | ✅ attract | ❌ no input yet |
+
 ### Not done
 
-* No input — the JVS board reports no buttons, coins or gun position, so attract mode plays but nothing can be started.
+* No input. The JVS board reports no buttons, coins or gun position, so attract mode plays but nothing can be started.
 * No sound.
-* Cg is still answered from the disc's precompiled `.asm_gl` files rather than compiled. It has not mattered yet, but the variant ambiguity described below is real and will.
+* Cg is still answered from the disc's precompiled `.asm_gl` files rather than compiled. That hasn't mattered yet, but the variant ambiguity in [docs/the-black-frame.md](docs/the-black-frame.md) is real and will.
 
-## Further reading
+### Further reading
 
-The detail moved to `docs/`, so this page stays a map.
+The detail lives in `docs/`, so this page stays a map.
 
 | | |
 |---|---|
@@ -60,34 +71,79 @@ The detail moved to `docs/`, so this page stays a map.
 | [docs/switches.md](docs/switches.md) | the `LINDBERGH_*` runtime switches |
 | [docs/disc.md](docs/disc.md) | what a clean game tree looks like |
 
-## Reproducing it
+## Getting Started
+
+There is no one-click setup yet (see the [roadmap](ROADMAP.md)). These steps
+take a clean Windows machine to the attract mode.
+
+1. **Install the prerequisites.**
+   * [Python 3.11](https://www.python.org/downloads/). Use `py -3.11`, not
+     `python`: on a fresh Windows, `python` can open the Microsoft Store instead.
+   * Visual Studio 2022 (Community is enough) with **Desktop development with
+     C++**. It includes the 32-bit MSVC toolchain and CMake 3.20 or newer.
+   * Git, and an OpenGL 4.x GPU driver.
+2. **Have a readable game tree.** It is the decrypted `disk0/` from a
+   *Let's Go Jungle* dump, laid out as in [docs/disc.md](docs/disc.md). The ELF is
+   `disk0\lgj_final`. This project does not decrypt discs.
+3. **Clone with the toolkit and install capstone.**
+   ```powershell
+   git clone --recursive https://github.com/sp00nznet/letsgojungle-lindbergh-recomp
+   cd letsgojungle-lindbergh-recomp
+   py -3.11 -m pip install capstone
+   ```
+4. **Lift the game to C.** This takes about 15 seconds, and the output goes to
+   the gitignored `games\letsgojungle\generated\`.
+   ```powershell
+   cd lindberghrecomp
+   py -3.11 -m tools recomp D:\lgj\disk0\lgj_final ..\games\letsgojungle\generated
+   cd ..
+   ```
+5. **Build.** See [Building from source](#building-from-source). This gives you
+   `build\Release\letsgojungle.exe`.
+6. **Run it from the game tree.**
+   ```powershell
+   cd D:\lgj\disk0
+   $env:TEA_DIR = (Get-Location).Path
+   $env:LINDBERGH_HLE_PERMISSIVE = 1
+   C:\path\to\letsgojungle-lindbergh-recomp\build\Release\letsgojungle.exe lgj_final
+   ```
+   `TEA_DIR` must point at the game tree, because the cabinet's launcher script
+   sets it and the engine won't find its data without it. The log should match
+   the block under [Status](#status), and the window should show the warning
+   card, then the logos.
+
+Trip-ups:
+* **`no lifted code ... building the toolkit self-check only`** at configure
+  time means step 4 didn't write into `games\letsgojungle\generated`.
+* **A CMake error about a 64-bit build** means `-A Win32` was left off.
+* **`pcrecomp submodule is missing`** means the clone wasn't recursive. Run
+  `git submodule update --init --recursive`.
+
+## Usage
 
 ```powershell
-git clone --recursive https://github.com/sp00nznet/letsgojungle-lindbergh-recomp
-cd letsgojungle-lindbergh-recomp
+# what the game asks the board for (run from lindberghrecomp\)
+py -3.11 -m tools elf D:\lgj\disk0\lgj_final
 
-# what the game asks the board for
-py -3.11 -m tools elf path\to\main.elf          # run from lindberghrecomp\
+# save the back buffer, or dump the shaders the engine supplies
+$env:LINDBERGH_SHOT = 1
+$env:LINDBERGH_DUMP_FP = "C:\tmp\fp"
+```
 
-# lift it
-py -3.11 -m tools recomp path\to\main.elf ..\games\letsgojungle\generated
+Every switch, with what it is for, is in [docs/switches.md](docs/switches.md).
 
-# build - 32-bit, and the CMake will not let you forget
+## Building from source
+
+```powershell
 cmake -S . -B build -A Win32
 cmake --build build --config Release
-.\build\Release\letsgojungle.exe path\to\main.elf
 ```
 
-Then run it from the game tree, which is what `TEA_DIR` has to point at —
-the cabinet's own launcher script sets it, and the engine will not find its
-data without it:
-
-```powershell
-cd path	o\disk0
-$env:TEA_DIR = (Get-Location).Path
-$env:LINDBERGH_HLE_PERMISSIVE = 1
-..uild\Release\letsgojungle.exe lgj_final
-```
+The build has to be 32-bit, because the game maps at `0x08048000`. Without
+lifted code in `games\letsgojungle\generated`, the same commands build and run
+the toolkit's self-check only. That is what CI does on every push, since CI
+has no game. The full build also runs on netlab (`netlab check
+letsgojungle-lindbergh-recomp`).
 
 ## Layout
 
@@ -98,10 +154,15 @@ games/letsgojungle/
   generated/                     the lifted C (you generate it; gitignored)
 ```
 
-## Legal
+## License
 
 The host and the recompilation toolchain are original work, MIT-licensed.
 **No game data, no disc images, no keys, and no circumvention of anything.**
 *Let's Go Jungle! Lost on the Island of Spice* is © Sega; this is an
 independent, non-commercial preservation project. Built on
 [**lindberghrecomp**](https://github.com/sp00nznet/lindberghrecomp).
+
+## Contributors
+
+Credited in [CONTRIBUTORS.md](CONTRIBUTORS.md). To help, read
+[CONTRIBUTING.md](CONTRIBUTING.md) first.
